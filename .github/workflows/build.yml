@@ -1,0 +1,35 @@
+# .github/workflows/build.yml
+name: Build Windows Executable
+
+on:
+  push:
+    branches: [ "main" ] # Runs whenever you push to the main branch
+  workflow_dispatch: # Allows you to run this workflow manually from the Actions tab
+
+jobs:
+  build:
+    runs-on: windows-latest # Use a Windows runner for the build
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 8.0.x # Use a recent .NET version
+
+    - name: Restore dependencies
+      run: dotnet restore
+
+    - name: Build and publish self-contained executable
+      run: > # This command builds a single .exe with the runtime included
+        dotnet publish --configuration Release --runtime win-x64 
+        --self-contained true /p:PublishSingleFile=true 
+        /p:IncludeNativeLibrariesForSelfExtract=true
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: SshHandler-Windows-Executable # The name of the downloadable file
+        path: ${{ github.workspace }}/SshHandler/bin/Release/net8.0-windows/win-x64/publish/SshHandler.exe # Adjust the path if your project name is different
