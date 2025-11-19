@@ -142,7 +142,7 @@ REM ============================================================================
     echo.
     SET /P "LEGACY_CHOICE=Enable legacy mode for old devices? (y/N): "
     IF /I "!LEGACY_CHOICE!"=="Y" (
-        SET "LegacyOpts=-o KexAlgorithms=+diffie-hellman-group1-sha1,diffie-hellman-group14-sha1 -o HostKeyAlgorithms=+ssh-rsa -o MACs=+hmac-sha1,hmac-sha1-96"
+        SET "LegacyOpts=-o KexAlgorithms=+diffie-hellman-group1-sha1,diffie-hellman-group14-sha1 -o HostKeyAlgorithms=+ssh-rsa -o MACs=+hmac-sha1,hmac-sha1-96 -o ciphers=+aes256-cbc"
         echo.
         echo [!] Legacy mode enabled. Insecure algorithms will be offered.
     )
