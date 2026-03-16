@@ -15,8 +15,10 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-      with:
-        autocrlf: input 
+
+    # This replaces the invalid 'autocrlf' input
+    - name: Configure Git Line Endings
+      run: git config --global core.autocrlf input
 
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
@@ -42,15 +44,18 @@ jobs:
       shell: pwsh
       run: |
         $path = "ssh-handler.sh"
-        $content = [System.IO.File]::ReadAllText((Get-Item $path).FullName)
-        $content = $content -replace "`r`n", "`n"
-        [System.IO.File]::WriteAllText((Get-Item $path).FullName, $content, (New-Object System.Text.UTF8Encoding($false)))
+        if (Test-Path $path) {
+            $content = [System.IO.File]::ReadAllText((Get-Item $path).FullName)
+            $content = $content -replace "`r`n", "`n"
+            [System.IO.File]::WriteAllText((Get-Item $path).FullName, $content, (New-Object System.Text.UTF8Encoding($false)))
+            Write-Host "Successfully converted $path to LF"
+        }
 
     - name: Prepare Assets with Versioning
       shell: pwsh
       run: |
         $tag = "${{ github.ref_name }}"
-        if (-not $tag) { $tag = "manual" }
+        if (-not $tag -or $tag -eq "main") { $tag = "manual" }
         
         # Rename Executables
         Move-Item ./publish-standalone/SshHandler.exe "./SshHandler-$tag-Standalone.exe"
