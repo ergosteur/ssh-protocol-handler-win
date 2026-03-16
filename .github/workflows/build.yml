@@ -16,7 +16,6 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        # Prevents git from automatically converting LF to CRLF during checkout
         autocrlf: input 
 
     - name: Setup .NET
@@ -27,29 +26,49 @@ jobs:
     - name: Restore dependencies
       run: dotnet restore
 
-    - name: Build and publish self-contained executable
+    - name: Build Standalone (Includes Runtime)
       run: >
-        dotnet publish --configuration Release --runtime win-x64 
+        dotnet publish SshHandler/SshHandler.csproj --configuration Release --runtime win-x64 
         --self-contained true /p:PublishSingleFile=true 
-        /p:IncludeNativeLibrariesForSelfExtract=true
+        -o ./publish-standalone
+
+    - name: Build Framework-Dependent (Requires .NET 8)
+      run: >
+        dotnet publish SshHandler/SshHandler.csproj --configuration Release 
+        --self-contained false /p:PublishSingleFile=true 
+        -o ./publish-dotnet8
 
     - name: Ensure Unix Line Endings for Shell Script
       shell: pwsh
       run: |
         $path = "ssh-handler.sh"
-        $content = Get-Content -Raw $path
-        # Replace CRLF with LF just in case
+        $content = [System.IO.File]::ReadAllText((Get-Item $path).FullName)
         $content = $content -replace "`r`n", "`n"
         [System.IO.File]::WriteAllText((Get-Item $path).FullName, $content, (New-Object System.Text.UTF8Encoding($false)))
+
+    - name: Prepare Assets with Versioning
+      shell: pwsh
+      run: |
+        $tag = "${{ github.ref_name }}"
+        if (-not $tag) { $tag = "manual" }
+        
+        # Rename Executables
+        Move-Item ./publish-standalone/SshHandler.exe "./SshHandler-$tag-Standalone.exe"
+        Move-Item ./publish-dotnet8/SshHandler.exe "./SshHandler-$tag-dotnet8.exe"
+        
+        # Rename Scripts
+        Copy-Item "ssh-handler.sh" "./ssh-handler-$tag.sh"
+        Copy-Item "openssh_protocol_handler.bat" "./openssh_protocol_handler-$tag.bat"
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
       if: startsWith(github.ref, 'refs/tags/')
       with:
         files: |
-          ${{ github.workspace }}/SshHandler/bin/Release/net8.0-windows/win-x64/publish/SshHandler.exe
-          ssh-handler.sh
-          openssh_protocol_handler.bat
+          SshHandler-*-Standalone.exe
+          SshHandler-*-dotnet8.exe
+          ssh-handler-*.sh
+          openssh_protocol_handler-*.bat
         generate_release_notes: true
         draft: false
         prerelease: false
