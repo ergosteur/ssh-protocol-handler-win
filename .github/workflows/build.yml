@@ -16,7 +16,6 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    # This replaces the invalid 'autocrlf' input
     - name: Configure Git Line Endings
       run: git config --global core.autocrlf input
 
@@ -28,17 +27,27 @@ jobs:
     - name: Restore dependencies
       run: dotnet restore
 
-    - name: Build Standalone (Includes Runtime)
-      run: >
-        dotnet publish SshHandler/SshHandler.csproj --configuration Release --runtime win-x64 
-        --self-contained true /p:PublishSingleFile=true 
-        -o ./publish-standalone
-
+    # 1. Build Framework-Dependent FIRST (The tiny one)
     - name: Build Framework-Dependent (Requires .NET 8)
       run: >
         dotnet publish SshHandler/SshHandler.csproj --configuration Release 
-        --self-contained false /p:PublishSingleFile=true 
+        --self-contained false 
+        /p:PublishSingleFile=true 
         -o ./publish-dotnet8
+
+    # 2. Clean to prevent artifact leakage
+    - name: Clean intermediate files
+      run: dotnet clean SshHandler/SshHandler.csproj
+
+    # 3. Build Standalone SECOND (The heavy one)
+    - name: Build Standalone (Includes Runtime)
+      run: >
+        dotnet publish SshHandler/SshHandler.csproj --configuration Release 
+        --runtime win-x64 
+        --self-contained true 
+        /p:PublishSingleFile=true 
+        /p:IncludeNativeLibrariesForSelfExtract=true
+        -o ./publish-standalone
 
     - name: Ensure Unix Line Endings for Shell Script
       shell: pwsh
@@ -48,7 +57,6 @@ jobs:
             $content = [System.IO.File]::ReadAllText((Get-Item $path).FullName)
             $content = $content -replace "`r`n", "`n"
             [System.IO.File]::WriteAllText((Get-Item $path).FullName, $content, (New-Object System.Text.UTF8Encoding($false)))
-            Write-Host "Successfully converted $path to LF"
         }
 
     - name: Prepare Assets with Versioning
