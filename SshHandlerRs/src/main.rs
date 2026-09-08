@@ -3,8 +3,8 @@
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::System::Registry::{
-    RegCreateKeyExW, RegSetValueExW, HKEY, HKEY_CLASSES_ROOT, KEY_WRITE, REG_OPTION_NON_VOLATILE,
-    REG_SZ,
+    RegCreateKeyExW, RegSetValueExW, HKEY, HKEY_CLASSES_ROOT, HKEY_LOCAL_MACHINE, KEY_WRITE,
+    REG_OPTION_NON_VOLATILE, REG_SZ,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::IsDlgButtonChecked;
@@ -25,6 +25,11 @@ const EM_SETSEL: u32 = 0x00B1;
 
 const LEGACY_ARGS: &str = "-o KexAlgorithms=+diffie-hellman-group1-sha1,diffie-hellman-group14-sha1 \
 -o HostKeyAlgorithms=+ssh-rsa -o MACs=+hmac-sha1,hmac-sha1-96 -o ciphers=+aes256-cbc";
+
+/// Our ProgID / capability-provider identifier under HKCR and RegisteredApplications.
+/// Distinct from the .bat's "ssh_custom_handler" so both can coexist/be told apart.
+const PROG_ID: &str = "ssh_handler_rs";
+const APP_DISPLAY_NAME: &str = "SSH Handler (Rust)";
 
 fn to_wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -157,17 +162,26 @@ fn setup_handler() {
     let command_str = format!("\"{exe_path}\" \"%1\"");
 
     let prompt = format!(
-        "This will register this application to handle all ssh:// links.\n\nCommand:\n{command_str}\n\nDo you want to proceed?"
+        "This will register this application ({APP_DISPLAY_NAME}) as a candidate handler for ssh:// links.\n\n\
+        Command:\n{command_str}\n\n\
+        After this, you may need to open Settings > Apps > Default Apps > \"Choose default apps by link type\", \
+        find \"ssh\", and select {APP_DISPLAY_NAME} explicitly — Windows does not let an installer silently \
+        override an existing default protocol handler.\n\n\
+        Do you want to proceed?"
     );
     let result = message_box(&prompt, "Registry Setup", MB_YESNO | MB_ICONQUESTION);
     if result != IDYES {
         return;
     }
 
-    match register_protocol(&command_str) {
+    match register_protocol(&exe_path, &command_str) {
         Ok(()) => {
             message_box(
-                "Successfully registered ssh:// protocol handler!",
+                &format!(
+                    "Registered {APP_DISPLAY_NAME} as an ssh:// handler.\n\n\
+                    If ssh:// links don't launch it, open Settings > Apps > Default Apps > \
+                    \"Choose default apps by link type\", find \"ssh\", and pick it there."
+                ),
                 "Success",
                 MB_OK | MB_ICONINFORMATION,
             );
@@ -182,20 +196,27 @@ fn setup_handler() {
     }
 }
 
-fn reg_set_sz(hkey: HKEY, value_name: PCWSTR, data: &str) -> windows::core::Result<()> {
-    let wide = to_wide(data);
-    let bytes = unsafe {
-        std::slice::from_raw_parts(wide.as_ptr() as *const u8, wide.len() * 2)
+/// Sets a REG_SZ value. `value_name = None` targets the key's default (unnamed) value.
+fn reg_set_sz(hkey: HKEY, value_name: Option<&str>, data: &str) -> windows::core::Result<()> {
+    let name_wide = value_name.map(to_wide);
+    let name_ptr = match &name_wide {
+        Some(w) => PCWSTR(w.as_ptr()),
+        None => PCWSTR::null(),
     };
-    unsafe { RegSetValueExW(hkey, value_name, 0, REG_SZ, Some(bytes)) }.ok()
+    let data_wide = to_wide(data);
+    let bytes = unsafe {
+        std::slice::from_raw_parts(data_wide.as_ptr() as *const u8, data_wide.len() * 2)
+    };
+    unsafe { RegSetValueExW(hkey, name_ptr, 0, REG_SZ, Some(bytes)) }.ok()
 }
 
-fn reg_create_key(subkey: PCWSTR) -> windows::core::Result<HKEY> {
+fn reg_create_key(root: HKEY, subkey: &str) -> windows::core::Result<HKEY> {
+    let subkey_wide = to_wide(subkey);
     let mut key = HKEY::default();
     unsafe {
         RegCreateKeyExW(
-            HKEY_CLASSES_ROOT,
-            subkey,
+            root,
+            PCWSTR(subkey_wide.as_ptr()),
             0,
             None,
             REG_OPTION_NON_VOLATILE,
@@ -209,13 +230,45 @@ fn reg_create_key(subkey: PCWSTR) -> windows::core::Result<HKEY> {
     Ok(key)
 }
 
-fn register_protocol(command_str: &str) -> windows::core::Result<()> {
-    let ssh_key = reg_create_key(w!("ssh"))?;
-    reg_set_sz(ssh_key, PCWSTR::null(), "URL:ssh Protocol")?;
-    reg_set_sz(ssh_key, w!("URL Protocol"), "")?;
+/// Registers via the "Default Programs" capability model (RegisteredApplications +
+/// a distinct ProgID with Capabilities\UrlAssociations), the same pattern
+/// `openssh_protocol_handler.bat` uses — this is what actually shows up in and gets
+/// honored by Windows' "Choose default apps by link type" UI. A bare
+/// HKCR\ssh\shell\open\command write is ignored once a UserChoice already exists for
+/// the protocol, which is the common case on Windows 10/11.
+fn register_protocol(exe_path: &str, command_str: &str) -> windows::core::Result<()> {
+    // Declare "ssh" as a URL protocol scheme (legacy marker some apps still check for).
+    let ssh_key = reg_create_key(HKEY_CLASSES_ROOT, "ssh")?;
+    reg_set_sz(ssh_key, None, "URL:ssh Protocol")?;
+    reg_set_sz(ssh_key, Some("URL Protocol"), "")?;
 
-    let cmd_key = reg_create_key(w!("ssh\\shell\\open\\command"))?;
-    reg_set_sz(cmd_key, PCWSTR::null(), command_str)?;
+    // Our ProgID: the actual open command plus Default-Apps display metadata.
+    let cmd_key = reg_create_key(HKEY_CLASSES_ROOT, &format!("{PROG_ID}\\shell\\open\\command"))?;
+    reg_set_sz(cmd_key, None, command_str)?;
+
+    let app_key = reg_create_key(HKEY_CLASSES_ROOT, &format!("{PROG_ID}\\Application"))?;
+    reg_set_sz(app_key, Some("ApplicationIcon"), &format!("\"{exe_path}\",0"))?;
+    reg_set_sz(app_key, Some("ApplicationName"), APP_DISPLAY_NAME)?;
+    reg_set_sz(
+        app_key,
+        Some("ApplicationDescription"),
+        "Handles ssh:// links via Windows OpenSSH",
+    )?;
+
+    let caps_key = reg_create_key(
+        HKEY_CLASSES_ROOT,
+        &format!("{PROG_ID}\\Capabilities\\UrlAssociations"),
+    )?;
+    reg_set_sz(caps_key, Some("ssh"), PROG_ID)?;
+
+    // Tell Windows' Default Apps UI this app exists as a capability provider.
+    let registered_key = reg_create_key(HKEY_LOCAL_MACHINE, "SOFTWARE\\RegisteredApplications")?;
+    reg_set_sz(
+        registered_key,
+        Some(APP_DISPLAY_NAME),
+        &format!("Software\\Classes\\{PROG_ID}\\Capabilities"),
+    )?;
+
     Ok(())
 }
 
