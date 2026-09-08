@@ -40,6 +40,8 @@ jobs:
       run: |
         $tag = "${{ github.ref_name }}"
         if (-not $tag -or $tag -eq "main") { $tag = "manual" }
+        # Branch names (workflow_dispatch) can contain "/", which breaks file paths.
+        $tag = $tag -replace '[\\/]', '-'
 
         # Rename Rust executable
         Move-Item SshHandlerRs/target/x86_64-pc-windows-msvc/release/ssh-handler.exe "./ssh-handler-rs-$tag.exe"
