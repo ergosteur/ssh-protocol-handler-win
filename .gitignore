@@ -19,3 +19,6 @@ x86/
 bld/
 [Bb]in/
 [Oo]bj/
+
+# Rust
+/SshHandlerRs/target/
