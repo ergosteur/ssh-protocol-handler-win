@@ -8,7 +8,21 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    # Builds natively on Windows (MSVC) via GitHub's windows-latest runner.
+    #
+    # If this workflow runs somewhere without a Windows runner available (e.g. a
+    # Gitea instance with only Linux act_runners registered), ssh-handler.exe can
+    # instead be cross-compiled from Linux with the GNU target + mingw-w64 — see
+    # the commented-out alternative lines throughout this file. To switch:
+    #   1. Swap the `runs-on` line below.
+    #   2. Uncomment the "Install mingw-w64" step.
+    #   3. In "Setup Rust" and "Build ssh-handler", use the x86_64-pc-windows-gnu
+    #      target instead of x86_64-pc-windows-msvc.
+    #   4. Swap "Ensure Unix Line Endings" and "Prepare Assets with Versioning"
+    #      for their bash equivalents (pwsh isn't guaranteed present on a bare
+    #      Linux runner the way it is on GitHub's ubuntu-latest).
+    runs-on: windows-latest  # Linux cross-compile: comment out this line
+    # runs-on: ubuntu-latest  # Linux cross-compile: uncomment this line
     permissions:
       contents: write
 
@@ -16,15 +30,22 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
+    # Linux cross-compile: uncomment this step
+    # - name: Install mingw-w64 (Linux cross-compile only)
+    #   run: sudo apt-get update && sudo apt-get install -y mingw-w64
+
     - name: Setup Rust
       uses: dtolnay/rust-toolchain@stable
       with:
-        targets: x86_64-pc-windows-msvc
+        targets: x86_64-pc-windows-msvc  # Linux cross-compile: comment out
+        # targets: x86_64-pc-windows-gnu  # Linux cross-compile: uncomment
 
     - name: Build ssh-handler (Rust)
       working-directory: SshHandlerRs
-      run: cargo build --release --target x86_64-pc-windows-msvc
+      run: cargo build --release --target x86_64-pc-windows-msvc  # Linux cross-compile: comment out
+      # run: cargo build --release --target x86_64-pc-windows-gnu  # Linux cross-compile: uncomment
 
+    # Linux cross-compile: comment out this whole step (through the closing "}")
     - name: Ensure Unix Line Endings for Shell Script
       shell: pwsh
       run: |
@@ -35,6 +56,12 @@ jobs:
             [System.IO.File]::WriteAllText((Get-Item $path).FullName, $content, (New-Object System.Text.UTF8Encoding($false)))
         }
 
+    # Linux cross-compile: uncomment this step (pwsh isn't guaranteed present on a bare Linux runner)
+    # - name: Ensure Unix Line Endings for Shell Script (Linux cross-compile only)
+    #   shell: bash
+    #   run: sed -i 's/\r$//' ssh-handler.sh
+
+    # Linux cross-compile: comment out this whole step (through the last Copy-Item line)
     - name: Prepare Assets with Versioning
       shell: pwsh
       run: |
@@ -49,6 +76,18 @@ jobs:
         # Rename Scripts
         Copy-Item "ssh-handler.sh" "./ssh-handler-$tag.sh"
         Copy-Item "openssh_protocol_handler.bat" "./openssh_protocol_handler-$tag.bat"
+
+    # Linux cross-compile: uncomment this step
+    # - name: Prepare Assets with Versioning (Linux cross-compile only)
+    #   shell: bash
+    #   run: |
+    #     tag="${{ github.ref_name }}"
+    #     if [ -z "$tag" ] || [ "$tag" == "main" ]; then tag="manual"; fi
+    #     tag="${tag//\//-}"
+    #
+    #     mv SshHandlerRs/target/x86_64-pc-windows-gnu/release/ssh-handler.exe "./ssh-handler-rs-$tag.exe"
+    #     cp ssh-handler.sh "./ssh-handler-$tag.sh"
+    #     cp openssh_protocol_handler.bat "./openssh_protocol_handler-$tag.bat"
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
