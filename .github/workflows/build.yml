@@ -16,38 +16,14 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Configure Git Line Endings
-      run: git config --global core.autocrlf input
-
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v4
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
       with:
-        dotnet-version: 8.0.x
+        targets: x86_64-pc-windows-msvc
 
-    - name: Restore dependencies
-      run: dotnet restore
-
-    # 1. Build Framework-Dependent FIRST (The tiny one)
-    - name: Build Framework-Dependent (Requires .NET 8)
-      run: >
-        dotnet publish SshHandler/SshHandler.csproj --configuration Release 
-        --self-contained false 
-        /p:PublishSingleFile=true 
-        -o ./publish-dotnet8
-
-    # 2. Clean to prevent artifact leakage
-    - name: Clean intermediate files
-      run: dotnet clean SshHandler/SshHandler.csproj
-
-    # 3. Build Standalone SECOND (The heavy one)
-    - name: Build Standalone (Includes Runtime)
-      run: >
-        dotnet publish SshHandler/SshHandler.csproj --configuration Release 
-        --runtime win-x64 
-        --self-contained true 
-        /p:PublishSingleFile=true 
-        /p:IncludeNativeLibrariesForSelfExtract=true
-        -o ./publish-standalone
+    - name: Build ssh-handler (Rust)
+      working-directory: SshHandlerRs
+      run: cargo build --release --target x86_64-pc-windows-msvc
 
     - name: Ensure Unix Line Endings for Shell Script
       shell: pwsh
@@ -64,11 +40,12 @@ jobs:
       run: |
         $tag = "${{ github.ref_name }}"
         if (-not $tag -or $tag -eq "main") { $tag = "manual" }
-        
-        # Rename Executables
-        Move-Item ./publish-standalone/SshHandler.exe "./SshHandler-$tag-Standalone.exe"
-        Move-Item ./publish-dotnet8/SshHandler.exe "./SshHandler-$tag-dotnet8.exe"
-        
+        # Branch names (workflow_dispatch) can contain "/", which breaks file paths.
+        $tag = $tag -replace '[\\/]', '-'
+
+        # Rename Rust executable
+        Move-Item SshHandlerRs/target/x86_64-pc-windows-msvc/release/ssh-handler.exe "./ssh-handler-rs-$tag.exe"
+
         # Rename Scripts
         Copy-Item "ssh-handler.sh" "./ssh-handler-$tag.sh"
         Copy-Item "openssh_protocol_handler.bat" "./openssh_protocol_handler-$tag.bat"
@@ -78,8 +55,7 @@ jobs:
       if: startsWith(github.ref, 'refs/tags/')
       with:
         files: |
-          SshHandler-*-Standalone.exe
-          SshHandler-*-dotnet8.exe
+          ssh-handler-rs-*.exe
           ssh-handler-*.sh
           openssh_protocol_handler-*.bat
         generate_release_notes: true

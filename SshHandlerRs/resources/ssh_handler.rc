@@ -1,0 +1,17 @@
+#include <windows.h>
+#include "resource.h"
+
+IDI_APPICON ICON "ssh_icon.ico"
+
+IDD_CONNECT DIALOGEX 0, 0, 260, 92
+STYLE DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "SSH Connect"
+FONT 9, "Segoe UI"
+BEGIN
+    LTEXT           "Target:", -1, 10, 13, 240, 10
+    EDITTEXT        IDC_EDIT_TARGET, 10, 25, 240, 14, ES_AUTOHSCROLL
+    CONTROL         "Legacy mode (older/insecure algorithms)", IDC_CHECK_LEGACY,
+                    "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 10, 47, 240, 12
+    DEFPUSHBUTTON   "Connect", IDOK, 94, 68, 75, 16
+    PUSHBUTTON      "Cancel", IDCANCEL, 174, 68, 75, 16
+END
